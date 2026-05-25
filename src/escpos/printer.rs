@@ -29,10 +29,19 @@ impl PaperWidth {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LineStyle {
+    pub justification: Justification,
+    pub emphasis: bool,
+    pub underline: bool,
+    pub italic: bool,
+    pub font_size: u32,
+}
+
 /// A single line element in the receipt buffer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReceiptLine {
-    Text(String),
+    Text(String, LineStyle),
     /// Monochrome bitmap: width in pixels, height in pixels, 1-bit-per-pixel packed data
     Bitmap { width_px: u32, height_px: u32, data: Vec<u8> },
     Separator,
@@ -124,26 +133,35 @@ impl PrinterState {
         }
     }
 
+    fn current_style(&self) -> LineStyle {
+        LineStyle {
+            justification: self.justification.clone(),
+            emphasis: self.emphasis,
+            underline: self.underline,
+            italic: self.italic,
+            font_size: self.font_size,
+        }
+    }
+
     fn add_text(&mut self, text: &str) {
-        if let Some(ReceiptLine::Text(last_line)) = self.buffer.last_mut() {
+        if let Some(ReceiptLine::Text(last_line, _)) = self.buffer.last_mut() {
             let max_chars = self.paper_width.get_max_chars(self.font_size);
             let current_length = last_line.chars().count();
-
             if current_length + text.chars().count() > max_chars as usize {
-                self.add_new_line();
-                if let Some(ReceiptLine::Text(new_line)) = self.buffer.last_mut() {
-                    new_line.push_str(text);
-                }
+                let style = self.current_style();
+                self.buffer.push(ReceiptLine::Text(text.to_string(), style));
             } else {
                 last_line.push_str(text);
             }
         } else {
-            self.buffer.push(ReceiptLine::Text(text.to_string()));
+            let style = self.current_style();
+            self.buffer.push(ReceiptLine::Text(text.to_string(), style));
         }
     }
 
     fn add_new_line(&mut self) {
-        self.buffer.push(ReceiptLine::Text(String::new()));
+        let style = self.current_style();
+        self.buffer.push(ReceiptLine::Text(String::new(), style));
     }
 
     fn add_separator(&mut self) {
@@ -206,7 +224,7 @@ impl PrinterState {
         let mut h = 0u32;
         for line in &self.buffer {
             match line {
-                ReceiptLine::Text(_) => h += self.line_height,
+                ReceiptLine::Text(_, _) => h += self.line_height,
                 ReceiptLine::Bitmap { height_px, .. } => h += height_px,
                 ReceiptLine::Separator => h += self.line_height,
             }

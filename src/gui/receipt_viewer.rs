@@ -4,6 +4,7 @@ use egui::{ColorImage, ScrollArea, TextureHandle, TextureOptions, Ui};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use crate::escpos::commands::Justification;
 
 pub struct ReceiptViewer {
     show_paper_edges: bool,
@@ -98,19 +99,49 @@ impl ReceiptViewer {
             // Receipt content
             for (line_num, line) in buffer.iter().enumerate() {
                 match line {
-                    ReceiptLine::Text(text) => {
+                    ReceiptLine::Text(text, style) => {
                         if !text.is_empty() {
                             ui.horizontal(|ui| {
                                 ui.label(format!("{:03}", line_num + 1));
                                 ui.label("│");
-                                if printer_state.emphasis {
-                                    ui.strong(text);
+
+                                // font_size do ESC/POS: 0=normal, 16=double-width, 32=double-height, 48=double
+                                let scale = if style.font_size >= 16 { 2.0f32 } else { 1.0f32 };
+                                let max_chars = (printer_state.paper_width
+                                    .get_max_chars(12) as f32 / scale) as usize;
+
+                                let aligned_text = match style.justification {
+                                    Justification::Center => {
+                                        let padding = max_chars.saturating_sub(text.chars().count()) / 2;
+                                        format!("{}{}", " ".repeat(padding), text)
+                                    }
+                                    Justification::Right => {
+                                        let padding = max_chars.saturating_sub(text.chars().count());
+                                        format!("{}{}", " ".repeat(padding), text)
+                                    }
+                                    _ => text.clone(),
+                                };
+
+                                // Aplicar tamanho de fonte visual
+                                let font_size = if style.font_size >= 16 { 18.0 } else { 13.0 };
+                                let text_widget = egui::RichText::new(&aligned_text)
+                                    .monospace()
+                                    .size(font_size);
+
+                                let text_widget = if style.emphasis {
+                                    text_widget.strong()
                                 } else {
-                                    ui.monospace(text);
-                                }
+                                    text_widget
+                                };
+
+                                let text_widget = if style.underline {
+                                    text_widget.underline()
+                                } else {
+                                    text_widget
+                                };
+
+                                ui.label(text_widget);
                             });
-                        } else {
-                            ui.label("");
                         }
                     }
                     ReceiptLine::Bitmap { width_px, height_px, data } => {
